@@ -1,0 +1,114 @@
+#!/bin/bash
+
+
+# 2021  Dan White
+
+# Collect Raspberry Pi system telemetry and publish via MQTT
+
+
+
+# Exit when there is an error
+set -e
+set -u
+set -o pipefail
+
+
+SLEEP_TIME=${PI_TELEMETRY_SLEEP_TIME:-10}
+
+PI_TELEMETRY_ID="${PI_TELEMETRY_ID:-$HOSTNAME}"
+
+TOPIC_PREFIX="${MQTT_TOPIC_PREFIX:-valpo/rtl433}"
+TOPIC="${TOPIC_PREFIX}/${PI_TELEMETRY_ID}"
+
+URL="mqtts://${MQTT_USER}:${MQTT_PASS}@${MQTT_HOST}:${MQTT_PORT}/${TOPIC}"
+
+#
+# MQTT with mosquitto_pub setup
+#
+MOSQUITTO_OPTS="-q 1"
+MOSQUITTO_OPTS+=" --capath /etc/ssl/certs"
+MOSQUITTO_OPTS+=" --will-topic '${TOPIC}/status'"
+MOSQUITTO_OPTS+=" --will-payload '{\"state\":\"lost-connection\"}'"
+MOSQUITTO_OPTS+=" --will-qos 1"
+
+
+# output some info about the current setup
+echo "mosquitto-opts: ${MOSQUITTO_OPTS}"
+echo "topic-base: ${TOPIC}"
+
+
+
+function get_cpu_temp {
+    X=$(vcgencmd measure_temp | awk 'BEGIN {FS= "[=\047]"} {print $2}')
+    echo "\"temp\":$X"
+}
+
+function get_fan_state {
+    # not all systems have a fan,
+    # return a valid JSON placeholder value instead
+    if [ -e /sys/class/thermal/cooling_device0/cur_state ]; then
+        FAN=$(cat /sys/class/thermal/cooling_device0/cur_state)
+    else
+        FAN="null"
+    fi
+    echo "\"fan\":$FAN"
+}
+
+function get_ip {
+    ifconfig $1 | awk '/inet / {print $2}'
+}
+
+function get_wlan_quality {
+    DATA=$(iwconfig wlan0 | awk 'BEGIN { FS = "[ =]+" } /Link/ {print $4, $7}')
+    DATA=($DATA)
+    SIGNAL="\"quality\":\"${DATA[0]}\",\"signal\":${DATA[1]}"
+    echo "$SIGNAL"
+}
+
+function get_network {
+    ESSID="$(iwgetid  | awk -F\" '{print $2}')"
+
+    NET="\"network\":{"
+    NET+="\"wlan0\":{\"essid\":\"$ESSID\", \"ip\":\"$(get_ip wlan0)\",$(get_wlan_quality)},"
+    NET+="\"tailscale0\":{\"ip\":\"$(get_ip tailscale0)\"}"
+    NET+="}"
+    echo "$NET"
+}
+	
+
+
+while true; do
+    JSON="{\"timestamp\":\"$(date -u +%FT%TZ)\""
+    JSON+=", $(get_cpu_temp)"
+    JSON+=", $(get_fan_state)"
+    JSON+=", $(get_network)"
+
+    #finish the JSON object
+    JSON+="}"
+
+    echo "${JSON}"
+
+    sleep $SLEEP_TIME
+done \
+    |  mosquitto_pub ${MOSQUITTO_OPTS} \
+        --url "${URL}/data" \
+        -l
+retval=$?
+
+# send a disconnect message to indicate whether the main pipe was intentionally
+# stopped or something went wrong
+if [ $retval -eq 0 ]; then
+    message='{"state":"disconnected"}'
+else
+    message="{\"state\":\"rtl_433 pipe exit $?\"}"
+fi
+
+mosquitto_pub ${MOSQUITTO_OPTS} \
+    --url "${URL}/status" \
+    --retain -m "${message}"
+
+# The exit status of this script is not useful, since we already have
+# (attempted to) send a status message via MQTT.  In the context of a systemd
+# service, we always want to restart the script when it exits if not otherwise
+# commanded to shut down.
+exit 1
