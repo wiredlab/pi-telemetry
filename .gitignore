@@ -1,0 +1,5 @@
+# do not commit secrets!
+pi-telemetry.env
+
+# this is a generated file
+pi-telemetry.service
