@@ -1,6 +1,7 @@
 [Unit]
 Description=RasPi system monitoring MQTT
-After=network.target
+Wants=network-online.target
+After=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
@@ -8,7 +9,8 @@ Type=simple
 Restart=always
 RestartSec=10
 User=pi
-ExecStart=PREFIX/bin/pi-telemetry
+WorkingDirectory=APPDIR
+ExecStart=APPDIR/venv/bin/python PREFIX/bin/pi-telemetry
 EnvironmentFile=-/etc/default/pi-telemetry.env
 
 [Install]

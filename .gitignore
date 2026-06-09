@@ -3,3 +3,5 @@ pi-telemetry.env
 
 # this is a generated file
 pi-telemetry.service
+
+__pycache__/
