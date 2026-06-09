@@ -7,10 +7,13 @@ known services. Fields are omitted when they are not relevant to the machine.
 
 ## Requirements
 
-* Python 3 with `venv`
+* Python 3.11 or newer with `venv`
 
 `sudo apt update && sudo apt install python3-venv`
 
+Raspberry Pi OS Bullseye ships Python 3.9 by default, which is too old for
+this service. The install target checks the interpreter version and aborts before
+installing when `PYTHON` does not meet the minimum.
 
 
 ## Install

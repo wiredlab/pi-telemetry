@@ -1,4 +1,5 @@
 import json
+import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -183,6 +184,19 @@ class TelemetryTests(unittest.TestCase):
             pi_telemetry.status_payload("lost-connection"),
             {"state": "lost-connection"},
         )
+
+    def test_makefile_rejects_python_older_than_minimum(self):
+        completed = subprocess.run(
+            ["make", "check-python", "MIN_PYTHON_VERSION=999.0"],
+            cwd=Path(__file__).resolve().parent.parent,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("pi-telemetry requires Python 999.0 or newer", completed.stderr)
 
 
 if __name__ == "__main__":
