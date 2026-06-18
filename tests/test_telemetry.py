@@ -174,6 +174,22 @@ class TelemetryTests(unittest.TestCase):
             {"systemd": {"piaware": "active", "rtl_433": "active"}},
         )
 
+    def test_systemd_discovery_filters_generic_units_and_deduplicates_candidates(self):
+        def run(args):
+            self.assertEqual(args[0], "systemctl")
+            return (
+                "ssh.service loaded active running OpenBSD Secure Shell server\n"
+                "cron.service loaded active running Regular background program processing daemon\n"
+                "piaware.service loaded active running PiAware ADS-B client\n"
+                "rtl_433.service loaded active running rtl_433 receiver\n"
+                "tailscaled.service loaded active running Tailscale node agent\n"
+                "rtl_433.service loaded active running rtl_433 receiver duplicate\n"
+            )
+
+        candidates = pi_telemetry.discover_systemd_service_candidates(command_runner=run)
+
+        self.assertEqual(candidates, ("piaware", "rtl_433", "tailscaled"))
+
     def test_detects_configured_docker_containers(self):
         calls = []
 
@@ -204,6 +220,19 @@ class TelemetryTests(unittest.TestCase):
                 }
             },
         )
+
+    def test_docker_discovery_returns_unique_container_names(self):
+        def run(args):
+            self.assertEqual(args, ["docker", "ps", "--all", "--format", "{{.Names}}\t{{.State}}"])
+            return (
+                "radiosonde_auto_rx\trunning\n"
+                "chasemapper\trunning\n"
+                "radiosonde_auto_rx\texited\n"
+            )
+
+        candidates = pi_telemetry.discover_docker_container_candidates(command_runner=run)
+
+        self.assertEqual(candidates, ("chasemapper", "radiosonde_auto_rx"))
 
     def test_docker_unavailable_omits_docker_services(self):
         def run(args):

@@ -30,6 +30,26 @@ AUTO_SERVICE_NAMES = {
     "tailscaled",
 }
 
+COMMON_SYSTEMD_SERVICE_NAMES = {
+    "avahi-daemon",
+    "bluetooth",
+    "cron",
+    "dbus",
+    "dhcpcd",
+    "getty@tty1",
+    "NetworkManager",
+    "polkit",
+    "rsyslog",
+    "ssh",
+    "systemd-journald",
+    "systemd-logind",
+    "systemd-resolved",
+    "systemd-timesyncd",
+    "systemd-udevd",
+    "udisks2",
+    "wpa_supplicant",
+}
+
 DISK_FS_TYPES = {
     "btrfs",
     "ext2",
@@ -424,25 +444,12 @@ def detect_systemd_services(
     command_runner: CommandRunner = run_command,
     extra: Iterable[str] = (),
 ) -> dict[str, str] | None:
-    output = command_runner(
-        [
-            "systemctl",
-            "list-units",
-            "--type=service",
-            "--state=running",
-            "--no-legend",
-            "--no-pager",
-        ]
-    )
+    output = running_systemd_unit_output(command_runner)
     if not output:
         return None
     wanted = AUTO_SERVICE_NAMES | {service.removesuffix(".service") for service in extra}
     services: dict[str, str] = {}
-    for line in output.splitlines():
-        unit = line.split(maxsplit=1)[0] if line.strip() else ""
-        if not unit.endswith(".service"):
-            continue
-        name = unit.removesuffix(".service")
+    for name in parse_systemd_unit_names(output):
         if name in wanted:
             services[name] = "active"
     return dict(sorted(services.items())) or None
@@ -470,6 +477,78 @@ def detect_docker_services(
             continue
         services[name] = "active" if state == "running" else state
     return dict(sorted(services.items())) or None
+
+
+def running_systemd_unit_output(command_runner: CommandRunner = run_command) -> str | None:
+    return command_runner(
+        [
+            "systemctl",
+            "list-units",
+            "--type=service",
+            "--state=running",
+            "--no-legend",
+            "--no-pager",
+        ]
+    )
+
+
+def parse_systemd_unit_names(output: str) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for line in output.splitlines():
+        unit = line.split(maxsplit=1)[0] if line.strip() else ""
+        if not unit.endswith(".service"):
+            continue
+        name = unit.removesuffix(".service")
+        if name not in seen:
+            names.append(name)
+            seen.add(name)
+    return tuple(names)
+
+
+def discover_systemd_service_candidates(
+    *,
+    command_runner: CommandRunner = run_command,
+) -> tuple[str, ...]:
+    output = running_systemd_unit_output(command_runner)
+    if not output:
+        return ()
+    candidates = [
+        name
+        for name in parse_systemd_unit_names(output)
+        if name in AUTO_SERVICE_NAMES and name not in COMMON_SYSTEMD_SERVICE_NAMES
+    ]
+    return tuple(sorted(candidates))
+
+
+def discover_docker_container_candidates(
+    *,
+    command_runner: CommandRunner = run_command,
+) -> tuple[str, ...]:
+    output = command_runner(["docker", "ps", "--all", "--format", "{{.Names}}\t{{.State}}"])
+    if not output:
+        return ()
+    names: set[str] = set()
+    for line in output.splitlines():
+        name, _separator, _state = line.partition("\t")
+        name = name.strip()
+        if name:
+            names.add(name)
+    return tuple(sorted(names))
+
+
+def discover_service_candidates(
+    *,
+    command_runner: CommandRunner = run_command,
+) -> dict[str, list[str]]:
+    candidates: dict[str, list[str]] = {}
+    systemd = discover_systemd_service_candidates(command_runner=command_runner)
+    docker = discover_docker_container_candidates(command_runner=command_runner)
+    if systemd:
+        candidates["systemd"] = list(systemd)
+    if docker:
+        candidates["docker"] = list(docker)
+    return candidates
 
 
 def detect_services(
