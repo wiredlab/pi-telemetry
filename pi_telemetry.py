@@ -448,6 +448,30 @@ def detect_systemd_services(
     return dict(sorted(services.items())) or None
 
 
+def detect_docker_services(
+    *,
+    command_runner: CommandRunner = run_command,
+    containers: Iterable[str] = (),
+) -> dict[str, str] | None:
+    wanted = {container for container in containers if container}
+    if not wanted:
+        return None
+    output = command_runner(["docker", "ps", "--all", "--format", "{{.Names}}\t{{.State}}"])
+    if not output:
+        return None
+    services: dict[str, str] = {}
+    for line in output.splitlines():
+        name, separator, state = line.partition("\t")
+        if not separator:
+            continue
+        name = name.strip()
+        state = state.strip().lower()
+        if name not in wanted:
+            continue
+        services[name] = "active" if state == "running" else state
+    return dict(sorted(services.items())) or None
+
+
 def detect_services(
     *,
     command_runner: CommandRunner = run_command,
@@ -458,6 +482,12 @@ def detect_services(
     systemd = detect_systemd_services(command_runner=command_runner, extra=extra_systemd)
     if systemd:
         services["systemd"] = systemd
+    docker = detect_docker_services(
+        command_runner=command_runner,
+        containers=docker_containers,
+    )
+    if docker:
+        services["docker"] = docker
     return services or None
 
 

@@ -174,6 +174,50 @@ class TelemetryTests(unittest.TestCase):
             {"systemd": {"piaware": "active", "rtl_433": "active"}},
         )
 
+    def test_detects_configured_docker_containers(self):
+        calls = []
+
+        def run(args):
+            calls.append(args)
+            if args[0] == "systemctl":
+                return None
+            self.assertEqual(args, ["docker", "ps", "--all", "--format", "{{.Names}}\t{{.State}}"])
+            return (
+                "radiosonde_auto_rx\trunning\n"
+                "chasemapper\trunning\n"
+                "maptilesdownloader\texited\n"
+                "postgres\trunning\n"
+            )
+
+        services = pi_telemetry.detect_services(
+            command_runner=run,
+            docker_containers=("radiosonde_auto_rx", "chasemapper", "maptilesdownloader"),
+        )
+
+        self.assertEqual(
+            services,
+            {
+                "docker": {
+                    "chasemapper": "active",
+                    "maptilesdownloader": "exited",
+                    "radiosonde_auto_rx": "active",
+                }
+            },
+        )
+
+    def test_docker_unavailable_omits_docker_services(self):
+        def run(args):
+            if args[0] == "docker":
+                return None
+            return "tailscaled.service loaded active running Tailscale node agent\n"
+
+        services = pi_telemetry.detect_services(
+            command_runner=run,
+            docker_containers=("radiosonde_auto_rx",),
+        )
+
+        self.assertEqual(services, {"systemd": {"tailscaled": "active"}})
+
     def test_load_config_parses_systemd_and_docker_service_lists(self):
         config = pi_telemetry.load_config(
             {
