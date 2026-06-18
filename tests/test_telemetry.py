@@ -169,7 +169,10 @@ class TelemetryTests(unittest.TestCase):
 
         services = pi_telemetry.detect_services(command_runner=run)
 
-        self.assertEqual(services, {"piaware": "active", "rtl_433": "active"})
+        self.assertEqual(
+            services,
+            {"systemd": {"piaware": "active", "rtl_433": "active"}},
+        )
 
     def test_load_config_parses_systemd_and_docker_service_lists(self):
         config = pi_telemetry.load_config(

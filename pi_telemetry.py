@@ -163,7 +163,11 @@ def collect_payload(
     add_if_present(
         payload,
         "services",
-        detect_services(command_runner=command_runner, extra=config.extra_services),
+        detect_services(
+            command_runner=command_runner,
+            extra_systemd=config.extra_services,
+            docker_containers=config.docker_containers,
+        ),
     )
     return payload
 
@@ -415,7 +419,7 @@ def wireless_stats(paths: Paths) -> dict[str, dict]:
     return stats
 
 
-def detect_services(
+def detect_systemd_services(
     *,
     command_runner: CommandRunner = run_command,
     extra: Iterable[str] = (),
@@ -442,6 +446,19 @@ def detect_services(
         if name in wanted:
             services[name] = "active"
     return dict(sorted(services.items())) or None
+
+
+def detect_services(
+    *,
+    command_runner: CommandRunner = run_command,
+    extra_systemd: Iterable[str] = (),
+    docker_containers: Iterable[str] = (),
+) -> dict[str, dict[str, str]] | None:
+    services: dict[str, dict[str, str]] = {}
+    systemd = detect_systemd_services(command_runner=command_runner, extra=extra_systemd)
+    if systemd:
+        services["systemd"] = systemd
+    return services or None
 
 
 def publish_loop(config: Config):
