@@ -629,10 +629,24 @@ def log_detected(config: Config):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="collect one payload and exit")
+    parser.add_argument(
+        "--discover-services",
+        action="store_true",
+        help="print candidate systemd and Docker service names for confirmation",
+    )
     parser.add_argument("--pretty", action="store_true", help="pretty-print JSON output")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config()
+    if args.discover_services:
+        print(
+            json.dumps(
+                discover_service_candidates(),
+                indent=2 if args.pretty else None,
+                sort_keys=True,
+            )
+        )
+        return 0
     if args.once:
         print(json.dumps(collect_payload(config), indent=2 if args.pretty else None, sort_keys=True))
         return 0

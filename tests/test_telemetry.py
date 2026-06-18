@@ -3,6 +3,7 @@ import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 import pi_telemetry
 
@@ -258,7 +259,27 @@ class TelemetryTests(unittest.TestCase):
 
         self.assertEqual(config.telemetry_id, "baird")
         self.assertEqual(config.extra_services, ("tailscaled", "piaware"))
-        self.assertEqual(config.docker_containers, ("radiosonde_auto_rx", "chasemapper"))
+
+    def test_main_prints_service_discovery_candidates(self):
+        with mock.patch.object(
+            pi_telemetry,
+            "discover_service_candidates",
+            return_value={
+                "systemd": ["piaware", "rtl_433"],
+                "docker": ["chasemapper", "radiosonde_auto_rx"],
+            },
+        ), mock.patch("builtins.print") as print_mock:
+            result = pi_telemetry.main(["--discover-services"])
+
+        self.assertEqual(result, 0)
+        printed = print_mock.call_args.args[0]
+        self.assertEqual(
+            json.loads(printed),
+            {
+                "docker": ["chasemapper", "radiosonde_auto_rx"],
+                "systemd": ["piaware", "rtl_433"],
+            },
+        )
 
     def test_status_messages_use_configured_topic(self):
         config = pi_telemetry.Config(telemetry_id="hertz", topic_prefix="wiredlab/hertz")
