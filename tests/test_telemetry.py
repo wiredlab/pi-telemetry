@@ -299,6 +299,7 @@ class TelemetryTests(unittest.TestCase):
 
         self.assertEqual(config.telemetry_id, "baird")
         self.assertEqual(config.extra_services, ("tailscaled", "piaware"))
+        self.assertEqual(config.docker_containers, ("radiosonde_auto_rx", "chasemapper"))
 
     def test_log_detected_reports_nested_service_names(self):
         with mock.patch.object(
