@@ -39,8 +39,31 @@ Optional settings:
 
 * `PI_TELEMETRY_ID`: telemetry id, default is hostname.
 * `PI_TELEMETRY_SLEEP_TIME`: seconds between publishes, default is 10.
-* `PI_TELEMETRY_SERVICES`: comma-separated systemd service names to include in
-  addition to auto-detected services.
+* `PI_TELEMETRY_SERVICES`: comma-separated confirmed systemd service names to
+  include in addition to built-in purpose services.
+* `PI_TELEMETRY_DOCKER_CONTAINERS`: comma-separated confirmed Docker container
+  names to include in service telemetry.
+
+Service telemetry is grouped by manager:
+
+```json
+{
+  "services": {
+    "systemd": {
+      "tailscaled": "active"
+    },
+    "docker": {
+      "radiosonde_auto_rx": "active"
+    }
+  }
+}
+```
+
+Use `./pi_telemetry.py --discover-services --pretty` on a reachable Pi to print
+candidate systemd services and Docker containers. Confirm that the names are
+part of that machine's purpose before adding them to `PI_TELEMETRY_SERVICES` or
+`PI_TELEMETRY_DOCKER_CONTAINERS`; generic OS services such as SSH, cron, and
+dbus should not be added just because they are running.
 
 
 ## Status topics

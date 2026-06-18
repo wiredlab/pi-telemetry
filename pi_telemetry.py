@@ -30,6 +30,26 @@ AUTO_SERVICE_NAMES = {
     "tailscaled",
 }
 
+COMMON_SYSTEMD_SERVICE_NAMES = {
+    "avahi-daemon",
+    "bluetooth",
+    "cron",
+    "dbus",
+    "dhcpcd",
+    "getty@tty1",
+    "NetworkManager",
+    "polkit",
+    "rsyslog",
+    "ssh",
+    "systemd-journald",
+    "systemd-logind",
+    "systemd-resolved",
+    "systemd-timesyncd",
+    "systemd-udevd",
+    "udisks2",
+    "wpa_supplicant",
+}
+
 DISK_FS_TYPES = {
     "btrfs",
     "ext2",
@@ -51,6 +71,7 @@ class Config:
     mqtt_username: str | None = None
     mqtt_password: str | None = None
     extra_services: tuple[str, ...] = ()
+    docker_containers: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -70,12 +91,27 @@ CommandRunner = Callable[[list[str]], str | None]
 DiskUsageFn = Callable[[Path], DiskUsage | None]
 
 
+def parse_csv_names(value: str, *, strip_service_suffix: bool = False) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in value.split(","):
+        name = item.strip()
+        if strip_service_suffix:
+            name = name.removesuffix(".service")
+        if name and name not in seen:
+            names.append(name)
+            seen.add(name)
+    return tuple(names)
+
+
 def load_config(environ: dict[str, str] | None = None) -> Config:
     env = os.environ if environ is None else environ
-    extra_services = tuple(
-        item.strip().removesuffix(".service")
-        for item in env.get("PI_TELEMETRY_SERVICES", "").split(",")
-        if item.strip()
+    extra_services = parse_csv_names(
+        env.get("PI_TELEMETRY_SERVICES", ""),
+        strip_service_suffix=True,
+    )
+    docker_containers = parse_csv_names(
+        env.get("PI_TELEMETRY_DOCKER_CONTAINERS", "")
     )
     return Config(
         telemetry_id=env.get("PI_TELEMETRY_ID") or socket.gethostname(),
@@ -86,6 +122,7 @@ def load_config(environ: dict[str, str] | None = None) -> Config:
         mqtt_username=env.get("MQTT_USER"),
         mqtt_password=env.get("MQTT_PASS"),
         extra_services=extra_services,
+        docker_containers=docker_containers,
     )
 
 
@@ -146,7 +183,11 @@ def collect_payload(
     add_if_present(
         payload,
         "services",
-        detect_services(command_runner=command_runner, extra=config.extra_services),
+        detect_services(
+            command_runner=command_runner,
+            extra_systemd=config.extra_services,
+            docker_containers=config.docker_containers,
+        ),
     )
     return payload
 
@@ -398,12 +439,48 @@ def wireless_stats(paths: Paths) -> dict[str, dict]:
     return stats
 
 
-def detect_services(
+def detect_systemd_services(
     *,
     command_runner: CommandRunner = run_command,
     extra: Iterable[str] = (),
 ) -> dict[str, str] | None:
-    output = command_runner(
+    output = running_systemd_unit_output(command_runner)
+    if not output:
+        return None
+    wanted = AUTO_SERVICE_NAMES | {service.removesuffix(".service") for service in extra}
+    services: dict[str, str] = {}
+    for name in parse_systemd_unit_names(output):
+        if name in wanted:
+            services[name] = "active"
+    return dict(sorted(services.items())) or None
+
+
+def detect_docker_services(
+    *,
+    command_runner: CommandRunner = run_command,
+    containers: Iterable[str] = (),
+) -> dict[str, str] | None:
+    wanted = {container for container in containers if container}
+    if not wanted:
+        return None
+    output = command_runner(["docker", "ps", "--all", "--format", "{{.Names}}\t{{.State}}"])
+    if not output:
+        return None
+    services: dict[str, str] = {}
+    for line in output.splitlines():
+        name, separator, state = line.partition("\t")
+        if not separator:
+            continue
+        name = name.strip()
+        state = state.strip().lower()
+        if name not in wanted:
+            continue
+        services[name] = "active" if state == "running" else state
+    return dict(sorted(services.items())) or None
+
+
+def running_systemd_unit_output(command_runner: CommandRunner = run_command) -> str | None:
+    return command_runner(
         [
             "systemctl",
             "list-units",
@@ -413,18 +490,84 @@ def detect_services(
             "--no-pager",
         ]
     )
-    if not output:
-        return None
-    wanted = AUTO_SERVICE_NAMES | {service.removesuffix(".service") for service in extra}
-    services: dict[str, str] = {}
+
+
+def parse_systemd_unit_names(output: str) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
     for line in output.splitlines():
         unit = line.split(maxsplit=1)[0] if line.strip() else ""
         if not unit.endswith(".service"):
             continue
         name = unit.removesuffix(".service")
-        if name in wanted:
-            services[name] = "active"
-    return dict(sorted(services.items())) or None
+        if name not in seen:
+            names.append(name)
+            seen.add(name)
+    return tuple(names)
+
+
+def discover_systemd_service_candidates(
+    *,
+    command_runner: CommandRunner = run_command,
+) -> tuple[str, ...]:
+    output = running_systemd_unit_output(command_runner)
+    if not output:
+        return ()
+    candidates = [
+        name
+        for name in parse_systemd_unit_names(output)
+        if name in AUTO_SERVICE_NAMES and name not in COMMON_SYSTEMD_SERVICE_NAMES
+    ]
+    return tuple(sorted(candidates))
+
+
+def discover_docker_container_candidates(
+    *,
+    command_runner: CommandRunner = run_command,
+) -> tuple[str, ...]:
+    output = command_runner(["docker", "ps", "--all", "--format", "{{.Names}}\t{{.State}}"])
+    if not output:
+        return ()
+    names: set[str] = set()
+    for line in output.splitlines():
+        name, _separator, _state = line.partition("\t")
+        name = name.strip()
+        if name:
+            names.add(name)
+    return tuple(sorted(names))
+
+
+def discover_service_candidates(
+    *,
+    command_runner: CommandRunner = run_command,
+) -> dict[str, list[str]]:
+    candidates: dict[str, list[str]] = {}
+    systemd = discover_systemd_service_candidates(command_runner=command_runner)
+    docker = discover_docker_container_candidates(command_runner=command_runner)
+    if systemd:
+        candidates["systemd"] = list(systemd)
+    if docker:
+        candidates["docker"] = list(docker)
+    return candidates
+
+
+def detect_services(
+    *,
+    command_runner: CommandRunner = run_command,
+    extra_systemd: Iterable[str] = (),
+    docker_containers: Iterable[str] = (),
+) -> dict[str, dict[str, str]] | None:
+    services: dict[str, dict[str, str]] = {}
+    systemd = detect_systemd_services(command_runner=command_runner, extra=extra_systemd)
+    if systemd:
+        services["systemd"] = systemd
+    docker = detect_docker_services(
+        command_runner=command_runner,
+        containers=docker_containers,
+    )
+    if docker:
+        services["docker"] = docker
+    return services or None
 
 
 def publish_loop(config: Config):
@@ -476,20 +619,47 @@ def publish_loop(config: Config):
         client.disconnect()
 
 
+def service_log_names(services: dict[str, dict[str, str]] | None) -> list[str]:
+    if not services:
+        return []
+    names: list[str] = []
+    for manager, manager_services in sorted(services.items()):
+        for name in sorted(manager_services):
+            names.append(f"{manager}:{name}")
+    return names
+
+
 def log_detected(config: Config):
     payload = collect_payload(config)
     LOG.info("detected disks: %s", ", ".join(payload.get("disk", {}).keys()) or "none")
     LOG.info("detected interfaces: %s", ", ".join(payload.get("network", {}).keys()) or "none")
-    LOG.info("detected services: %s", ", ".join(payload.get("services", {}).keys()) or "none")
+    LOG.info(
+        "detected services: %s",
+        ", ".join(service_log_names(payload.get("services"))) or "none",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="collect one payload and exit")
+    parser.add_argument(
+        "--discover-services",
+        action="store_true",
+        help="print candidate systemd and Docker service names for confirmation",
+    )
     parser.add_argument("--pretty", action="store_true", help="pretty-print JSON output")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config()
+    if args.discover_services:
+        print(
+            json.dumps(
+                discover_service_candidates(),
+                indent=2 if args.pretty else None,
+                sort_keys=True,
+            )
+        )
+        return 0
     if args.once:
         print(json.dumps(collect_payload(config), indent=2 if args.pretty else None, sort_keys=True))
         return 0
