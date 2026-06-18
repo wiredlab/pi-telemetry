@@ -51,6 +51,7 @@ class Config:
     mqtt_username: str | None = None
     mqtt_password: str | None = None
     extra_services: tuple[str, ...] = ()
+    docker_containers: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -70,12 +71,27 @@ CommandRunner = Callable[[list[str]], str | None]
 DiskUsageFn = Callable[[Path], DiskUsage | None]
 
 
+def parse_csv_names(value: str, *, strip_service_suffix: bool = False) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in value.split(","):
+        name = item.strip()
+        if strip_service_suffix:
+            name = name.removesuffix(".service")
+        if name and name not in seen:
+            names.append(name)
+            seen.add(name)
+    return tuple(names)
+
+
 def load_config(environ: dict[str, str] | None = None) -> Config:
     env = os.environ if environ is None else environ
-    extra_services = tuple(
-        item.strip().removesuffix(".service")
-        for item in env.get("PI_TELEMETRY_SERVICES", "").split(",")
-        if item.strip()
+    extra_services = parse_csv_names(
+        env.get("PI_TELEMETRY_SERVICES", ""),
+        strip_service_suffix=True,
+    )
+    docker_containers = parse_csv_names(
+        env.get("PI_TELEMETRY_DOCKER_CONTAINERS", "")
     )
     return Config(
         telemetry_id=env.get("PI_TELEMETRY_ID") or socket.gethostname(),
@@ -86,6 +102,7 @@ def load_config(environ: dict[str, str] | None = None) -> Config:
         mqtt_username=env.get("MQTT_USER"),
         mqtt_password=env.get("MQTT_PASS"),
         extra_services=extra_services,
+        docker_containers=docker_containers,
     )
 
 

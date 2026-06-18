@@ -171,6 +171,19 @@ class TelemetryTests(unittest.TestCase):
 
         self.assertEqual(services, {"piaware": "active", "rtl_433": "active"})
 
+    def test_load_config_parses_systemd_and_docker_service_lists(self):
+        config = pi_telemetry.load_config(
+            {
+                "PI_TELEMETRY_ID": "baird",
+                "PI_TELEMETRY_SERVICES": " tailscaled.service, piaware, tailscaled.service ",
+                "PI_TELEMETRY_DOCKER_CONTAINERS": " radiosonde_auto_rx, chasemapper, radiosonde_auto_rx ",
+            }
+        )
+
+        self.assertEqual(config.telemetry_id, "baird")
+        self.assertEqual(config.extra_services, ("tailscaled", "piaware"))
+        self.assertEqual(config.docker_containers, ("radiosonde_auto_rx", "chasemapper"))
+
     def test_status_messages_use_configured_topic(self):
         config = pi_telemetry.Config(telemetry_id="hertz", topic_prefix="wiredlab/hertz")
 
