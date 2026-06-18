@@ -222,6 +222,46 @@ class TelemetryTests(unittest.TestCase):
             },
         )
 
+    def test_collect_payload_reports_systemd_and_docker_services_separately(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            proc = root / "proc"
+            sys = root / "sys"
+            proc.mkdir()
+            sys.mkdir()
+
+            def run(args):
+                if args[0] == "systemctl":
+                    return (
+                        "tailscaled.service loaded active running Tailscale node agent\n"
+                        "ssh.service loaded active running OpenBSD Secure Shell server\n"
+                    )
+                if args[0] == "docker":
+                    return (
+                        "radiosonde_auto_rx\trunning\n"
+                        "postgres\trunning\n"
+                    )
+                return None
+
+            payload = pi_telemetry.collect_payload(
+                pi_telemetry.Config(
+                    telemetry_id="baird",
+                    topic_prefix="prefix",
+                    docker_containers=("radiosonde_auto_rx",),
+                ),
+                paths=pi_telemetry.Paths(proc=proc, sys=sys),
+                command_runner=run,
+                disk_usage=lambda _path: None,
+            )
+
+        self.assertEqual(
+            payload["services"],
+            {
+                "docker": {"radiosonde_auto_rx": "active"},
+                "systemd": {"tailscaled": "active"},
+            },
+        )
+
     def test_docker_discovery_returns_unique_container_names(self):
         def run(args):
             self.assertEqual(args, ["docker", "ps", "--all", "--format", "{{.Names}}\t{{.State}}"])
@@ -259,6 +299,38 @@ class TelemetryTests(unittest.TestCase):
 
         self.assertEqual(config.telemetry_id, "baird")
         self.assertEqual(config.extra_services, ("tailscaled", "piaware"))
+
+    def test_log_detected_reports_nested_service_names(self):
+        with mock.patch.object(
+            pi_telemetry,
+            "collect_payload",
+            return_value={
+                "disk": {"sda1": {}},
+                "network": {"wlan0": {}},
+                "services": {
+                    "docker": {"radiosonde_auto_rx": "active"},
+                    "systemd": {"tailscaled": "active"},
+                },
+            },
+        ), mock.patch.object(pi_telemetry.LOG, "info") as info_mock:
+            pi_telemetry.log_detected(pi_telemetry.Config(telemetry_id="baird"))
+
+        self.assertEqual(
+            [call.args[0] for call in info_mock.call_args_list],
+            [
+                "detected disks: %s",
+                "detected interfaces: %s",
+                "detected services: %s",
+            ],
+        )
+        self.assertEqual(
+            [call.args[1] for call in info_mock.call_args_list],
+            [
+                "sda1",
+                "wlan0",
+                "docker:radiosonde_auto_rx, systemd:tailscaled",
+            ],
+        )
 
     def test_main_prints_service_discovery_candidates(self):
         with mock.patch.object(

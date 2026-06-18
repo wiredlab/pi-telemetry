@@ -619,11 +619,24 @@ def publish_loop(config: Config):
         client.disconnect()
 
 
+def service_log_names(services: dict[str, dict[str, str]] | None) -> list[str]:
+    if not services:
+        return []
+    names: list[str] = []
+    for manager, manager_services in sorted(services.items()):
+        for name in sorted(manager_services):
+            names.append(f"{manager}:{name}")
+    return names
+
+
 def log_detected(config: Config):
     payload = collect_payload(config)
     LOG.info("detected disks: %s", ", ".join(payload.get("disk", {}).keys()) or "none")
     LOG.info("detected interfaces: %s", ", ".join(payload.get("network", {}).keys()) or "none")
-    LOG.info("detected services: %s", ", ".join(payload.get("services", {}).keys()) or "none")
+    LOG.info(
+        "detected services: %s",
+        ", ".join(service_log_names(payload.get("services"))) or "none",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
