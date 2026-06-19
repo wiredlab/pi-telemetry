@@ -38,7 +38,7 @@ automatic by default.
 Optional settings:
 
 * `PI_TELEMETRY_ID`: telemetry id, default is hostname.
-* `PI_TELEMETRY_SLEEP_TIME`: seconds between publishes, default is 10.
+* `PI_TELEMETRY_SLEEP_TIME`: seconds between publishes, default is 30.
 * `PI_TELEMETRY_SERVICES`: comma-separated confirmed systemd service names to
   include in addition to built-in purpose services.
 * `PI_TELEMETRY_DOCKER_CONTAINERS`: comma-separated confirmed Docker container

@@ -116,7 +116,7 @@ def load_config(environ: dict[str, str] | None = None) -> Config:
     return Config(
         telemetry_id=env.get("PI_TELEMETRY_ID") or socket.gethostname(),
         topic_prefix=env.get("MQTT_TOPIC_PREFIX", "pi-telemetry").strip("/"),
-        interval=float(env.get("PI_TELEMETRY_SLEEP_TIME", "10")),
+        interval=float(env.get("PI_TELEMETRY_SLEEP_TIME", "30")),
         mqtt_host=env.get("MQTT_HOST"),
         mqtt_port=int(env.get("MQTT_PORT", "8883")),
         mqtt_username=env.get("MQTT_USER"),
